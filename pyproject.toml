@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snitt-client"
+version = "0.1.0"
+description = "Shared Snitt.hu client plus optional Google Sheets, AniDB UDP, and Crunchyroll helpers"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27",
+  "beautifulsoup4>=4.12",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.9,<2"]
+sheets = ["gspread>=6", "google-auth>=2", "google-auth-oauthlib>=1.2"]
+anidb = []  # stdlib UDP client under snitt_anidb (no GPL anidb-client dependency)
+crunchyroll = []  # unofficial httpx client under snitt_crunchyroll (httpx already a core dep)
+dev = ["pytest>=8.0", "mcp>=1.9,<2", "gspread>=6", "google-auth>=2", "google-auth-oauthlib>=1.2"]
+all = ["mcp>=1.9,<2", "gspread>=6", "google-auth>=2", "google-auth-oauthlib>=1.2"]
+
+[project.scripts]
+snitt = "snitt_client.cli:main"
+snitt-mcp = "snitt_client.mcp_server:main"
+snitt-sheets-mcp = "snitt_google_sheets.mcp_server:main"
+snitt-sheets-auth = "snitt_google_sheets.session:main_auth"
+snitt-anidb-mcp = "snitt_anidb.mcp_server:main"
+snitt-anidb = "snitt_anidb.cli:main"
+snitt-crunchyroll-mcp = "snitt_crunchyroll.mcp_server:main"
+snitt-crunchyroll = "snitt_crunchyroll.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["snitt_client*", "snitt_google_sheets*", "snitt_anidb*", "snitt_crunchyroll*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

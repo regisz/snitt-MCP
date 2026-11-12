@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "snitt": {
+      "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-mcp",
+      "args": []
+    },
+    "snitt-sheets": {
+      "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-sheets-mcp",
+      "args": []
+    },
+    "snitt-anidb": {
+      "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-anidb-mcp",
+      "args": [],
+      "env": {
+        "ANIDB_USER": "PASTE_LOCAL_ONLY",
+        "ANIDB_CLIENT": "snittanidb",
+        "ANIDB_CLIENTVER": "1"
+      }
+    },
+    "snitt-crunchyroll": {
+      "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-crunchyroll-mcp",
+      "args": []
+    },
+    "anilist": {
+      "command": "npx",
+      "args": ["-y", "anilist-mcp-server"],
+      "env": {
+        "ANILIST_CLIENT_ID": "PASTE_LOCAL_ONLY",
+        "ANILIST_CLIENT_SECRET": "PASTE_LOCAL_ONLY"
+      }
+    },
+    "mal": {
+      "command": "npx",
+      "args": ["-y", "mal-mcp"],
+      "env": {
+        "MAL_CLIENT_ID": "PASTE_LOCAL_ONLY"
+      }
+    }
+  }
+}

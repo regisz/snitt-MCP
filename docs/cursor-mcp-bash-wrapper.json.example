@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "snitt": {
+      "command": "bash",
+      "args": [
+        "-lc",
+        "'/home/balage/devel-magán/snitt.hu - MCP/.venv/bin/snitt-mcp'"
+      ]
+    }
+  }
+}
