@@ -226,10 +226,11 @@ def main_auth(argv: list[str] | None = None) -> int:
     :param list[str] | None argv: Optional argv (without program name).
     :rtype: int
     """
-    import argparse
     import sys
 
-    parser = argparse.ArgumentParser(
+    from snitt_client.argparse_compat import argument_parser
+
+    parser = argument_parser(
         prog="snitt-sheets-auth",
         description="Google Sheets browser OAuth for snitt-sheets (stores refresh token locally).",
     )

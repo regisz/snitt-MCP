@@ -8,6 +8,7 @@ import json
 import sys
 from typing import Any
 
+from snitt_client.argparse_compat import argument_parser
 from snitt_crunchyroll.client import CrunchyrollClient, CrunchyrollClientError
 from snitt_crunchyroll.http import CrunchyrollHttpError
 from snitt_crunchyroll.session import CrunchyrollAuthError, etp_rt_from_env
@@ -18,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     :rtype: argparse.ArgumentParser
     """
-    parser = argparse.ArgumentParser(
+    parser = argument_parser(
         prog="snitt-crunchyroll",
         description=(
             "Crunchyroll helpers. Prefer login-etp-rt once (stores tokens under "

@@ -9,6 +9,7 @@ from typing import Any
 
 from snitt_anidb.client import AniDBClient
 from snitt_anidb.session import AniDBAuthError
+from snitt_client.argparse_compat import argument_parser
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     :rtype: argparse.ArgumentParser
     """
-    parser = argparse.ArgumentParser(
+    parser = argument_parser(
         prog="snitt-anidb",
         description=(
             "AniDB helpers. Password is prompted via getpass into process memory "

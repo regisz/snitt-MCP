@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from snitt_client.argparse_compat import argument_parser
 from snitt_client.client import SnittClient, SnittClientError
 from snitt_client.session import SessionConfigError
 
@@ -31,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     :rtype: argparse.ArgumentParser
     """
-    parser = argparse.ArgumentParser(prog="snitt", description="Snitt.hu sheet client (JSON output)")
+    parser = argument_parser(prog="snitt", description="Snitt.hu sheet client (JSON output)")
     parser.add_argument("--config", help="Cookie file path (default: ~/.snitt-hu-downloader.cfg or SNITT_COOKIE)")
     sub = parser.add_subparsers(dest="command", required=True)
 
