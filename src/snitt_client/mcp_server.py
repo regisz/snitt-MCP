@@ -30,6 +30,19 @@ TOOL_NAMES: tuple[str, ...] = (
     "snitt_series_watch_span",
     "snitt_list_ratings",
     "snitt_fetch_rating",
+    "snitt_fetch_watching_form",
+    "snitt_plan_mark_watched",
+    "snitt_apply_mark_watched",
+    "snitt_plan_favorite",
+    "snitt_apply_favorite",
+    "snitt_plan_set_rating",
+    "snitt_apply_set_rating",
+    "snitt_plan_add_review",
+    "snitt_apply_review",
+    "snitt_plan_delete_watching",
+    "snitt_apply_delete_watching",
+    "snitt_plan_delete_review",
+    "snitt_apply_delete_review",
 )
 
 
@@ -276,6 +289,241 @@ def create_mcp(client_factory: ClientFactory | None = None, config_path: Path | 
             with factory() as client:
                 entry = client.fetch_rating(review_id)
                 return {"ok": True, "rating": entry.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_fetch_watching_form",
+        description="GET mark-watched modal: series episode options or movie in_cinema fields (no POST).",
+    )
+    def snitt_fetch_watching_form(slug: str) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                form = client.fetch_watching_form(slug)
+                return {"ok": True, "form": form.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_mark_watched",
+        description="Dry-run plan for Most néztem… (POST filmnezesek). Series needs episode_id or episode_label.",
+    )
+    def snitt_plan_mark_watched(
+        slug: str,
+        episode_id: int | None = None,
+        episode_label: str | None = None,
+        season_number: int | None = None,
+        episode_number: int | None = None,
+        review: str | None = None,
+        spoiler: bool = False,
+        in_cinema: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_mark_watched(
+                    slug,
+                    episode_id=episode_id,
+                    episode_label=episode_label,
+                    season_number=season_number,
+                    episode_number=episode_number,
+                    review=review,
+                    spoiler=spoiler,
+                    in_cinema=in_cinema,
+                )
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_mark_watched",
+        description="POST mark-watched only when allow_save=true, then verify filmnézések. Default refuses writes.",
+    )
+    def snitt_apply_mark_watched(
+        slug: str,
+        episode_id: int | None = None,
+        episode_label: str | None = None,
+        season_number: int | None = None,
+        episode_number: int | None = None,
+        review: str | None = None,
+        spoiler: bool = False,
+        in_cinema: bool = False,
+        allow_save: bool = False,
+    ) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_mark_watched first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_mark_watched(
+                    slug,
+                    episode_id=episode_id,
+                    episode_label=episode_label,
+                    season_number=season_number,
+                    episode_number=episode_number,
+                    review=review,
+                    spoiler=spoiler,
+                    in_cinema=in_cinema,
+                )
+                result = client.save_watching(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_favorite",
+        description="Dry-run favorite heart plan (add POST …/kedvenc-filmek or remove POST /kedvenc-filmek/<id> _method=delete).",
+    )
+    def snitt_plan_favorite(slug: str, want_favorite: bool) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_favorite(slug, want_favorite)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_favorite",
+        description="POST favorite heart only when allow_save=true, then re-fetch verify. Default refuses writes.",
+    )
+    def snitt_apply_favorite(slug: str, want_favorite: bool, allow_save: bool = False) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_favorite first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_favorite(slug, want_favorite)
+                result = client.save_favorite(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_set_rating",
+        description="Dry-run personal 1–10 star rating via POST /ertekelesek/set_rating?book_id=… (_method=patch).",
+    )
+    def snitt_plan_set_rating(slug: str, stars: int) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_set_rating(slug, stars)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_set_rating",
+        description="POST personal stars only when allow_save=true, then re-fetch verify. Default refuses writes.",
+    )
+    def snitt_apply_set_rating(slug: str, stars: int, allow_save: bool = False) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_set_rating first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_set_rating(slug, stars)
+                result = client.save_rating(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_add_review",
+        description="Dry-run Új értékelés text review (POST /ertekelesek). No POST.",
+    )
+    def snitt_plan_add_review(slug: str, text: str, spoiler: bool = False) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_add_review(slug, text, spoiler=spoiler)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_review",
+        description="POST text review only when allow_save=true, then verify film értékelések list. Default refuses writes.",
+    )
+    def snitt_apply_review(slug: str, text: str, spoiler: bool = False, allow_save: bool = False) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_add_review first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_add_review(slug, text, spoiler=spoiler)
+                result = client.save_review(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_delete_watching",
+        description="Dry-run delete one filmnézés (POST /filmnezesek/<id> _method=delete). No POST.",
+    )
+    def snitt_plan_delete_watching(watching_id: int) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_delete_watching(watching_id)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_delete_watching",
+        description="Delete filmnézés only when allow_save=true, then verify detail gone. Default refuses writes.",
+    )
+    def snitt_apply_delete_watching(watching_id: int, allow_save: bool = False) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_delete_watching first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_delete_watching(watching_id)
+                result = client.save_delete_watching(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_delete_review",
+        description="Dry-run delete one értékelés (POST /ertekelesek/<id> _method=delete). No POST.",
+    )
+    def snitt_plan_delete_review(review_id: int) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_delete_review(review_id)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_delete_review",
+        description="Delete értékelés only when allow_save=true, then verify detail gone. Default refuses writes.",
+    )
+    def snitt_apply_delete_review(review_id: int, allow_save: bool = False) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_delete_review first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_delete_review(review_id)
+                result = client.save_delete_review(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
         except _TOOL_ERRORS as exc:
             return _error_payload(exc)
 

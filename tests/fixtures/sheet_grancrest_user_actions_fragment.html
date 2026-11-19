@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Grancrest Senki · Film · Snitt</title>
+  <meta name="csrf-param" content="authenticity_token" />
+  <meta name="csrf-token" content="TEST_CSRF_TOKEN" />
+</head>
+<body>
+  <h1>Grancrest Senki</h1>
+  <a class="set_editorial_bookmark tooltip invisible" data-editorial-bookmarkers="[]" href="/konyvjelzok/set_editorial?bookmarkable_id=32800&amp;bookmarkable_type=Book" title="Szerkesztői">+</a>
+  <div>
+    <span><a class="favorite on tooltip" href="/kedvenc-filmek/555804" rel="delete" title="Nem kedvenc tovább"><i class="fas fa-heart"></i></a></span>
+    <div class="set_rating" id="rating"><span class="rater-off"><span class="rater-on" style="width: 64px;"></span></span></div>
+    <script>$('#rating').rater({postHref: '/ertekelesek/set_rating?book_id=32800', rating: 8})</script>
+    <a class="action" href="/filmek/grancrest-senki/ertekelesek/uj" id="new_review" rel="modal">Új értékelés</a>
+  </div>
+  <a class="button" href="/filmek/grancrest-senki/filmnezesek/uj" rel="modal">Most néztem egy részt</a>
+  <a href="/filmek/grancrest-senki/cimkezesek/uj">+ Új címke</a>
+  <a href="/filmek/grancrest-senki/cimkezesek/uj-mufaj">+ Új műfaj</a>
+  <a href="/filmek/grancrest-senki/leirasok/uj">+ Új leírás</a>
+  <div id="tags"><a rel="tag" href="/cimkek/politika">politika</a></div>
+</body>
+</html>

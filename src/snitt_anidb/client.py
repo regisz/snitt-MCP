@@ -1,4 +1,4 @@
-"""AniDB UDP client: single session, flood pacing, ban latch, gated mylist writes."""
+"""AniDB UDP client: single session, flood pacing, ban latch, gated mylist/vote writes."""
 
 from __future__ import annotations
 
@@ -28,6 +28,9 @@ from snitt_anidb.transport import SocketUdpTransport, UdpTransport
 BAN_CODES = frozenset({504, 555})
 CRITICAL_CODES = frozenset({502})  # ACCESS DENIED — treat as latch-worthy
 AUTH_OK = frozenset({200, 201})
+VOTE_TYPE_PERMANENT = 1
+VOTE_TYPE_TEMPORARY = 2
+VOTE_OK_CODES = frozenset({260, 261, 262})  # VOTED / VOTE FOUND / VOTE UPDATED
 
 
 class AniDBClientError(RuntimeError):
@@ -423,7 +426,94 @@ class AniDBClient:
             "entry": map_fields(MYLIST_FIELDS, reply.fields) if reply.fields else None,
         }
 
+    def plan_vote(
+        self,
+        *,
+        aid: int,
+        stars: float,
+        temporary: bool = False,
+    ) -> dict[str, Any]:
+        """Build a VOTE preview without sending UDP (Permanent/Temporary Vote, 1–10).
+
+        Maps UI stars to AniDB ``value`` as ``stars * 100`` (100–1000). Default is
+        permanent vote (``type=1``); ``temporary=True`` uses temporary (``type=2``).
+
+        :param int aid: Anime id.
+        :param float stars: Score 1–10 (half-stars allowed, e.g. 7.5 → value 750).
+        :param bool temporary: Use temporary vote instead of permanent.
+        :rtype: dict[str, Any]
+        """
+        params = self._vote_params(aid=aid, stars=stars, temporary=temporary)
+        command = encode_command("VOTE", {**params, "s": "<session>"})
+        return {
+            "ok": True,
+            "dry_run": True,
+            "command": "VOTE",
+            "params": params,
+            "stars": stars,
+            "vote_kind": "temporary" if temporary else "permanent",
+            "preview": command,
+            "note": "No UDP sent. Call vote with allow_save=True after explicit approval.",
+        }
+
+    def vote(
+        self,
+        *,
+        aid: int,
+        stars: float,
+        allow_save: bool = False,
+        temporary: bool = False,
+    ) -> dict[str, Any]:
+        """VOTE permanent/temporary anime score; refuses unless ``allow_save`` is True.
+
+        Permanent votes require finished airing on AniDB (else ``363 PERMVOTE NOT ALLOWED``).
+
+        :param int aid: Anime id.
+        :param float stars: Score 1–10 (half-stars allowed).
+        :param bool allow_save: Write gate (default False).
+        :param bool temporary: Temporary vote (``type=2``) instead of permanent.
+        :rtype: dict[str, Any]
+        """
+        plan = self.plan_vote(aid=aid, stars=stars, temporary=temporary)
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=True",
+                "dry_run_hint": "Use plan_vote / anidb_plan_vote first",
+                "plan": plan,
+            }
+        params = self._vote_params(aid=aid, stars=stars, temporary=temporary)
+        reply = self._command("VOTE", params, require_auth=True)
+        return {
+            "ok": reply.code in VOTE_OK_CODES,
+            "reply": reply.to_dict(),
+            "plan": plan,
+            "vote": {
+                "name": reply.fields[0] if len(reply.fields) > 0 else None,
+                "value": reply.fields[1] if len(reply.fields) > 1 else None,
+                "type": reply.fields[2] if len(reply.fields) > 2 else None,
+                "id": reply.fields[3] if len(reply.fields) > 3 else None,
+            } if reply.fields else None,
+        }
+
     # --- internals ------------------------------------------------------
+
+    @staticmethod
+    def _vote_params(*, aid: int, stars: float, temporary: bool) -> dict[str, Any]:
+        try:
+            score = float(stars)
+        except (TypeError, ValueError) as exc:
+            raise AniDBClientError("stars must be a number between 1 and 10") from exc
+        if score < 1.0 or score > 10.0:
+            raise AniDBClientError("stars must be between 1 and 10 inclusive")
+        value = int(round(score * 100))
+        if value < 100 or value > 1000:
+            raise AniDBClientError(f"vote value out of range after scaling: {value}")
+        return {
+            "type": VOTE_TYPE_TEMPORARY if temporary else VOTE_TYPE_PERMANENT,
+            "id": aid,
+            "value": value,
+        }
 
     @staticmethod
     def _mylistadd_params(

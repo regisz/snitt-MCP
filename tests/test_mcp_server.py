@@ -67,6 +67,12 @@ def test_apply_tools_refuse_without_allow_save() -> None:
         ("snitt_apply_tag", {"slug": "nyarido-szamitas", "name": "politika"}),
         ("snitt_apply_genre", {"slug": "nyarido-szamitas", "name": "thriller"}),
         ("snitt_apply_description", {"slug": "nyarido-szamitas", "text": "példa"}),
+        ("snitt_apply_mark_watched", {"slug": "nyarido-szamitas"}),
+        ("snitt_apply_favorite", {"slug": "nyarido-szamitas", "want_favorite": True}),
+        ("snitt_apply_set_rating", {"slug": "nyarido-szamitas", "stars": 7}),
+        ("snitt_apply_review", {"slug": "nyarido-szamitas", "text": "példa"}),
+        ("snitt_apply_delete_watching", {"watching_id": 1}),
+        ("snitt_apply_delete_review", {"review_id": 1}),
     ):
         result = _call(mcp, tool_name, args)
         assert result["ok"] is False

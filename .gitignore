@@ -1,0 +1,27 @@
+# Python / build
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dist/
+*.egg-info/
+build/
+
+# Local env / secrets
+.env
+.env.*
+mcp.json
+*credentials*.json
+*token*.json
+client_secret*.json
+service_account*.json
+*.pem
+
+# Local session / config (no tracked *.cfg in repo)
+*.cfg
+etp_rt*
+.snitt*
+
+# IDE (not tracked)
+.idea/
+.vscode/

@@ -22,6 +22,8 @@ TOOL_NAMES: tuple[str, ...] = (
     "anidb_mylist_stats",
     "anidb_plan_mark_watched",
     "anidb_mark_watched",
+    "anidb_plan_vote",
+    "anidb_vote",
     "anidb_reset_ban_latch",
 )
 
@@ -59,12 +61,13 @@ def create_mcp(client_factory: ClientFactory | None = None) -> FastMCP:
         name="snitt-anidb",
         instructions=(
             "AniDB UDP tools (paced client; IP ban risk if flooded). "
-            "Prefer anidb_session_status and dry-run anidb_plan_mark_watched first. "
+            "Prefer anidb_session_status and dry-run anidb_plan_mark_watched / anidb_plan_vote first. "
             "Before AUTH tools: call anidb_set_password once (password stays in MCP process "
             "memory only; result is ok/ready — never echoed). Optional anidb_clear_credentials "
             "clears password + session. "
             "Identity: ANIDB_USER/CLIENT/CLIENTVER or ~/.config/snitt/anidb.cfg — omit ANIDB_PASS "
             "from mcp.json. Writes require allow_save=true only with explicit permission. "
+            "Permanent Vote is anidb_vote stars 1–10 (UDP VOTE type=1, value=stars*100). "
             "Client name must be registered with AniDB. "
             "On ban, tools stop until anidb_reset_ban_latch after the ban window."
         ),
@@ -189,6 +192,43 @@ def create_mcp(client_factory: ClientFactory | None = None) -> FastMCP:
                 edit=edit,
                 lid=lid,
             )
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="anidb_plan_vote",
+        description=(
+            "Dry-run VOTE preview for Permanent/Temporary Vote (no UDP). "
+            "stars=1–10 maps to value=stars*100; temporary=false is Permanent Vote."
+        ),
+    )
+    def anidb_plan_vote(aid: int, stars: float, temporary: bool = False) -> dict[str, Any]:
+        try:
+            return factory().plan_vote(aid=aid, stars=stars, temporary=temporary)
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="anidb_vote",
+        description=(
+            "VOTE anime score only when allow_save=true. stars=1–10 (Permanent Vote by default; "
+            "temporary=true for Temporary Vote). Default refuses writes."
+        ),
+    )
+    def anidb_vote(
+        aid: int,
+        stars: float,
+        allow_save: bool = False,
+        temporary: bool = False,
+    ) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use anidb_plan_vote first",
+            }
+        try:
+            return factory().vote(aid=aid, stars=stars, allow_save=True, temporary=temporary)
         except _TOOL_ERRORS as exc:
             return _error_payload(exc)
 

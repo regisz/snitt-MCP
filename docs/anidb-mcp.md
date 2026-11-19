@@ -118,7 +118,11 @@ Restarting the MCP server clears memory; set the password again.
 | `anidb_mylist_stats` | `MYLISTSTATS` |
 | `anidb_plan_mark_watched` | Dry-run `MYLISTADD` preview |
 | `anidb_mark_watched` | Gated write (`allow_save=true`) |
+| `anidb_plan_vote` | Dry-run `VOTE` preview (UI 1–10 → `value=stars*100`; default permanent) |
+| `anidb_vote` | Gated `VOTE` (`allow_save=true`; `temporary=true` for Temporary Vote) |
 | `anidb_reset_ban_latch` | Clear local ban latch |
+
+Permanent Vote maps to UDP `VOTE type=1&id={aid}&value={stars*100}`. AniDB rejects permanent votes until finished airing (`363 PERMVOTE NOT ALLOWED`); use Temporary Vote in that case.
 
 Fuzzy search is **not** implemented (UDP has no safe fuzzy search without flooding; use exact name or aid).
 

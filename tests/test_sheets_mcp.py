@@ -59,3 +59,18 @@ def test_append_refuses_without_allow_write() -> None:
     )
     assert result["ok"] is False
     assert "allow_write" in result["error"]
+
+
+def test_update_cells_refuses_without_allow_write() -> None:
+    mcp = create_mcp(client_factory=_factory)
+    result = _call(
+        mcp,
+        "sheets_update_cells",
+        {
+            "spreadsheet": "abcXYZ123",
+            "worksheet_title": "Anime",
+            "cells": [{"row": 2, "col": 1, "value": "x"}],
+        },
+    )
+    assert result["ok"] is False
+    assert "allow_write" in result["error"]

@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
 import gspread
 from gspread import Spreadsheet, Worksheet
+from gspread.utils import a1_to_rowcol, rowcol_to_a1
 
 from snitt_google_sheets.session import load_credentials
 
 _SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
+# How far to search for a same-column format donor when inheriting cell style.
+_FORMAT_DONOR_RADIUS = 40
 
 
 class GoogleSheetsError(RuntimeError):
@@ -125,6 +128,9 @@ class GoogleSheetsClient:
     ) -> dict[str, Any]:
         """Append rows only when ``allow_write`` is True.
 
+        Writes plain values only (values.append / USER_ENTERED). Never sends
+        ``userEnteredFormat``, ``textFormat``, or ``fontFamily``.
+
         :param str spreadsheet_id_or_url: Spreadsheet id or Sheets URL.
         :param str worksheet_title: Tab title.
         :param Sequence[Sequence[Any]] rows: Values to append.
@@ -139,6 +145,163 @@ class GoogleSheetsClient:
         sheet = self.worksheet(spreadsheet_id, worksheet_title)
         sheet.append_rows(list(rows), value_input_option="USER_ENTERED")
         return {"ok": True, "appended": len(rows), "spreadsheet_id": spreadsheet_id}
+
+    def update_cells(
+        self,
+        spreadsheet_id_or_url: str,
+        worksheet_title: str,
+        cells: Sequence[Mapping[str, Any]],
+        *,
+        allow_write: bool,
+    ) -> dict[str, Any]:
+        """Update individual cells with plain values only when ``allow_write`` is True.
+
+        Never sends ``userEnteredFormat`` / ``textFormat`` / ``fontFamily`` with the
+        value write. After writing, cells that still lack user-entered text format
+        inherit formatting from the nearest same-column neighbour (PASTE_FORMAT),
+        so e.g. Vélemény text matches neighbouring Times/serif rows.
+
+        Each item is either ``{"row": int, "col": int, "value": ...}`` (1-based) or
+        ``{"a1": "L278", "value": ...}``.
+
+        :param str spreadsheet_id_or_url: Spreadsheet id or Sheets URL.
+        :param str worksheet_title: Tab title.
+        :param Sequence[Mapping[str, Any]] cells: Cells to update.
+        :param bool allow_write: Explicit write gate; False refuses the call.
+        :rtype: dict[str, Any]
+        """
+        if not allow_write:
+            raise GoogleSheetsError("Refusing write: pass allow_write=True only with explicit permission.")
+        if not cells:
+            return {"ok": True, "updated": 0}
+        spreadsheet_id = spreadsheet_id_from_url(spreadsheet_id_or_url)
+        book = self.open_by_key(spreadsheet_id)
+        sheet = book.worksheet(worksheet_title)
+        parsed: list[tuple[int, int, Any]] = []
+        for item in cells:
+            if "a1" in item:
+                row, col = a1_to_rowcol(str(item["a1"]))
+                parsed.append((row, col, item.get("value")))
+            else:
+                row = int(item["row"])
+                col = int(item["col"])
+                if row < 1 or col < 1:
+                    raise GoogleSheetsError("row and col must be 1-based positive integers.")
+                parsed.append((row, col, item.get("value")))
+        # Plain values only — no CellFormat / fontFamily in the values write.
+        gspread_cells = [
+            gspread.Cell(row, col, "" if value is None else value) for row, col, value in parsed
+        ]
+        sheet.update_cells(gspread_cells, value_input_option="USER_ENTERED")
+        inherited = self._inherit_formats_for_cells(book, sheet, [(row, col) for row, col, _ in parsed])
+        return {
+            "ok": True,
+            "updated": len(parsed),
+            "format_inherited": inherited,
+            "spreadsheet_id": spreadsheet_id,
+        }
+
+    def _inherit_formats_for_cells(
+        self,
+        book: Spreadsheet,
+        sheet: Worksheet,
+        targets: Sequence[tuple[int, int]],
+    ) -> int:
+        """Copy PASTE_FORMAT onto targets that lack userEntered text format.
+
+        :param Spreadsheet book: Open spreadsheet.
+        :param Worksheet sheet: Target worksheet.
+        :param Sequence[tuple[int, int]] targets: 1-based (row, col) pairs.
+        :rtype: int
+        """
+        if not targets:
+            return 0
+        by_col: dict[int, set[int]] = {}
+        for row, col in targets:
+            by_col.setdefault(col, set()).add(row)
+        ranges: list[str] = []
+        for col, rows in by_col.items():
+            lo = max(1, min(rows) - _FORMAT_DONOR_RADIUS)
+            hi = max(rows) + _FORMAT_DONOR_RADIUS
+            start = rowcol_to_a1(lo, col)
+            end = rowcol_to_a1(hi, col)
+            ranges.append(f"'{sheet.title}'!{start}:{end}")
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{book.id}"
+        params = {
+            "ranges": ranges,
+            "includeGridData": "true",
+            "fields": "sheets(data(startRow,startColumn,rowData(values(userEnteredFormat/textFormat))))",
+        }
+        payload = book.client.request("get", url, params=params).json()
+        sheets = payload.get("sheets") or []
+        if not sheets:
+            return 0
+        # col -> {row: has textFormat}
+        has_format: dict[int, dict[int, bool]] = {col: {} for col in by_col}
+        for block in sheets[0].get("data") or []:
+            start_row = int(block.get("startRow") or 0)
+            start_col = int(block.get("startColumn") or 0)
+            col = start_col + 1
+            if col not in has_format:
+                continue
+            for offset, row_data in enumerate(block.get("rowData") or []):
+                row = start_row + offset + 1
+                values = row_data.get("values") or []
+                cell = values[0] if values else {}
+                text_format = ((cell.get("userEnteredFormat") or {}).get("textFormat")) or {}
+                has_format[col][row] = bool(text_format.get("fontFamily") or text_format)
+        requests: list[dict[str, Any]] = []
+        for col, rows in by_col.items():
+            flags = has_format.get(col) or {}
+            for row in rows:
+                if flags.get(row):
+                    continue
+                donor = _nearest_format_donor(flags, row)
+                if donor is None:
+                    continue
+                requests.append(
+                    {
+                        "copyPaste": {
+                            "source": {
+                                "sheetId": sheet.id,
+                                "startRowIndex": donor - 1,
+                                "endRowIndex": donor,
+                                "startColumnIndex": col - 1,
+                                "endColumnIndex": col,
+                            },
+                            "destination": {
+                                "sheetId": sheet.id,
+                                "startRowIndex": row - 1,
+                                "endRowIndex": row,
+                                "startColumnIndex": col - 1,
+                                "endColumnIndex": col,
+                            },
+                            "pasteType": "PASTE_FORMAT",
+                            "pasteOrientation": "NORMAL",
+                        }
+                    }
+                )
+        if not requests:
+            return 0
+        book.batch_update({"requests": requests})
+        return len(requests)
+
+
+def _nearest_format_donor(flags: Mapping[int, bool], row: int) -> int | None:
+    """Return nearest row with format flag True, or None.
+
+    :param Mapping[int, bool] flags: row -> has user-entered text format.
+    :param int row: Target 1-based row.
+    :rtype: int | None
+    """
+    for delta in range(1, _FORMAT_DONOR_RADIUS + 1):
+        above = row - delta
+        if flags.get(above):
+            return above
+        below = row + delta
+        if flags.get(below):
+            return below
+    return None
 
 
 __all__ = ["GoogleSheetsClient", "GoogleSheetsError", "spreadsheet_id_from_url"]

@@ -65,6 +65,36 @@ def test_plan_and_refuse_write() -> None:
     assert transport.sent == []
 
 
+def test_plan_and_refuse_vote() -> None:
+    transport = MockUdpTransport()
+    mcp = create_mcp(client_factory=_factory(transport))
+    plan = _call(mcp, "anidb_plan_vote", {"aid": 42, "stars": 6})
+    assert plan["ok"] is True
+    assert plan["dry_run"] is True
+    assert plan["params"]["value"] == 600
+    refused = _call(mcp, "anidb_vote", {"aid": 42, "stars": 6})
+    assert refused["ok"] is False
+    assert "allow_save" in refused["error"]
+    assert transport.sent == []
+
+
+def test_vote_via_mcp() -> None:
+    transport = MockUdpTransport()
+    transport.queue("200 sess LOGIN ACCEPTED", "260 VOTED\nDemo|600|1|42")
+    limiter = FloodRateLimiter(sleeper=lambda _s: None)
+    client = AniDBClient(
+        credentials=_creds(),
+        transport=transport,
+        rate_limiter=limiter,
+        create_socket=False,
+    )
+    mcp = create_mcp(client_factory=lambda: client)
+    result = _call(mcp, "anidb_vote", {"aid": 42, "stars": 6, "allow_save": True})
+    assert result["ok"] is True
+    assert result["vote"]["value"] == "600"
+    assert any(b"VOTE " in payload for payload in transport.sent)
+
+
 def test_lookup_via_mcp() -> None:
     transport = MockUdpTransport()
     transport.queue(

@@ -48,6 +48,15 @@ snitt plan-tag --slug grancrest-senki --name politika
 
 # dry-run description plan (no POST)
 snitt plan-description --slug dota-a-sarkany-vere --text "példa szöveg"
+
+# user-actions (GET / dry-run only; no POST)
+snitt fetch-watching-form --slug grancrest-senki
+snitt plan-mark-watched --slug grancrest-senki --episode-label "1x01"
+snitt plan-favorite --slug grancrest-senki --want-favorite true
+snitt plan-set-rating --slug grancrest-senki --stars 8
+snitt plan-add-review --slug grancrest-senki --text "példa vélemény"
+snitt plan-delete-watching --watching-id 12345
+snitt plan-delete-review --review-id 2317943
 ```
 
 Writes are refused unless `--allow-save` is passed (and Balázs explicitly allowed the change):
@@ -55,6 +64,7 @@ Writes are refused unless `--allow-save` is passed (and Balázs explicitly allow
 ```bash
 # will refuse without --allow-save
 snitt apply-genre --slug nyarido-szamitas --name thriller
+snitt apply-mark-watched --slug grancrest-senki --episode-label "1x01"
 ```
 
 ## Cursor MCP (local stdio)
@@ -91,6 +101,10 @@ Then use `docs/cursor-mcp.json.example` in `~/.cursor/mcp.json` (or project `.cu
         "ANIDB_CLIENT": "snittanidb",
         "ANIDB_CLIENTVER": "1"
       }
+    },
+    "snitt-crunchyroll": {
+      "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-crunchyroll-mcp",
+      "args": []
     }
   }
 }
@@ -122,6 +136,19 @@ Optional: `SNITT_COOKIE` / `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` / AniDB ENV unde
 | `snitt_series_watch_span` | series first/latest from year pages |
 | `snitt_list_ratings` | értékelések: stars + review text |
 | `snitt_fetch_rating` | one értékelés detail |
+| `snitt_fetch_watching_form` | GET mark-watched modal (episodes / movie fields) |
+| `snitt_plan_mark_watched` | dry-run Most néztem… |
+| `snitt_apply_mark_watched` | gated POST (`allow_save=true`) |
+| `snitt_plan_favorite` | dry-run kedvenc heart add/remove |
+| `snitt_apply_favorite` | gated POST (`allow_save=true`) |
+| `snitt_plan_set_rating` | dry-run personal 1–10 stars |
+| `snitt_apply_set_rating` | gated POST (`allow_save=true`) |
+| `snitt_plan_add_review` | dry-run Új értékelés text |
+| `snitt_apply_review` | gated POST (`allow_save=true`) |
+| `snitt_plan_delete_watching` | dry-run delete one filmnézés |
+| `snitt_apply_delete_watching` | gated DELETE (`allow_save=true`) |
+| `snitt_plan_delete_review` | dry-run delete one értékelés |
+| `snitt_apply_delete_review` | gated DELETE (`allow_save=true`) |
 
 #### `snitt-sheets` server (`snitt-sheets-mcp`)
 
@@ -130,6 +157,7 @@ Optional: `SNITT_COOKIE` / `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` / AniDB ENV unde
 | `sheets_list_worksheets` | tab titles (id or URL) |
 | `sheets_read_records` | all rows as dicts |
 | `sheets_append_rows` | gated append (`allow_write=true`) |
+| `sheets_update_cells` | gated cell update (`allow_write=true`; inherits neighbour format) |
 
 Typical check: Sheets `sheets_read_records` + Snitt `snitt_list_watchings` / `snitt_series_watch_span`, then compare in chat.
 
@@ -145,6 +173,8 @@ Typical check: Sheets `sheets_read_records` + Snitt `snitt_list_watchings` / `sn
 | `anidb_mylist_stats` | `MYLISTSTATS` |
 | `anidb_plan_mark_watched` | dry-run `MYLISTADD` preview |
 | `anidb_mark_watched` | gated write (`allow_save=true`) |
+| `anidb_plan_vote` | dry-run `VOTE` preview (Permanent Vote 1–10 → value×100) |
+| `anidb_vote` | gated `VOTE` (`allow_save=true`; `temporary=true` → Temporary Vote) |
 | `anidb_reset_ban_latch` | clear local ban latch |
 
 Omit `ANIDB_PASS` from `mcp.json`; call `anidb_set_password` once per MCP process. Full setup: `docs/anidb-mcp.md`.
@@ -194,9 +224,11 @@ Direct Sheets API reads (no CSV). Sync Snitt → sheet not wired yet. Full OAuth
 - `src/snitt_client/` — library, CLI, MCP
 - `src/snitt_google_sheets/` — gspread + OAuth/SA auth + `snitt-sheets-mcp`
 - `src/snitt_anidb/` — paced AniDB UDP client + `snitt-anidb-mcp`
+- `src/snitt_crunchyroll/` — unofficial Crunchyroll client + `snitt-crunchyroll-mcp`
 - `tests/fixtures/` — sanitized HTML/JSON samples
 - `docs/google-sheets-oauth.md` — first-run browser OAuth
 - `docs/anidb-mcp.md` — AniDB credentials, registration, flood/ban, license choice
-- `docs/cursor-mcp.json.example` — Cursor mcp.json (snitt + sheets + anidb + anilist + mal; space-free symlink)
+- `docs/crunchyroll-mcp.md` — Crunchyroll token file, watchlist/playhead, ToS note
+- `docs/cursor-mcp.json.example` — Cursor mcp.json (snitt + sheets + anidb + crunchyroll + anilist + mal; space-free symlink)
 - `docs/cursor-mcp-bash-wrapper.json.example` — bash `-lc` alternative
 - Project store: `docs/anilist-mal-mcp-setup.md` — AniList/MAL OAuth + MCP setup (HU+EN)

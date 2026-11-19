@@ -18,6 +18,7 @@ TOOL_NAMES: tuple[str, ...] = (
     "sheets_list_worksheets",
     "sheets_read_records",
     "sheets_append_rows",
+    "sheets_update_cells",
 )
 
 
@@ -51,6 +52,8 @@ def create_mcp(
             "Google Sheets tools for Balázs anime/watch tables (direct API via gspread; no CSV export). "
             "Prefer sheets_read_records before any write. "
             "Writes require allow_write=true only with explicit permission. "
+            "Writes send plain values only (no userEnteredFormat / fontFamily); "
+            "sheets_update_cells inherits neighbour cell formatting via PASTE_FORMAT. "
             "Auth: browser OAuth token at ~/.config/snitt/google-oauth-token.json "
             "(run snitt-sheets-auth once); optional service-account fallback. "
             "Snitt.hu auth is separate cookie/session — not Google browser OAuth."
@@ -87,7 +90,10 @@ def create_mcp(
 
     @mcp.tool(
         name="sheets_append_rows",
-        description="Append rows only when allow_write=true. rows is a list of row value lists.",
+        description=(
+            "Append rows only when allow_write=true. rows is a list of row value lists. "
+            "Plain values only — no CellFormat / fontFamily."
+        ),
     )
     def sheets_append_rows(
         spreadsheet: str,
@@ -104,6 +110,36 @@ def create_mcp(
         try:
             client = factory()
             result = client.append_rows(spreadsheet, worksheet_title, rows, allow_write=True)
+            return {"ok": True, **result}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+        except Exception as exc:  # noqa: BLE001
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="sheets_update_cells",
+        description=(
+            "Update individual cells only when allow_write=true. "
+            "cells: list of {row,col,value} (1-based) or {a1,value}. "
+            "Plain values only (no fontFamily); inherits neighbour formatting when needed "
+            "(e.g. Vélemény / review text)."
+        ),
+    )
+    def sheets_update_cells(
+        spreadsheet: str,
+        worksheet_title: str,
+        cells: list[dict[str, Any]],
+        allow_write: bool = False,
+    ) -> dict[str, Any]:
+        if not allow_write:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_write=true",
+                "dry_run_hint": "Use sheets_read_records first; only update after explicit permission",
+            }
+        try:
+            client = factory()
+            result = client.update_cells(spreadsheet, worksheet_title, cells, allow_write=True)
             return {"ok": True, **result}
         except _TOOL_ERRORS as exc:
             return _error_payload(exc)

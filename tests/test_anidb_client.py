@@ -155,6 +155,31 @@ def test_plan_and_gated_mark_watched() -> None:
     assert any(b"MYLISTADD" in payload for payload in transport.sent)
 
 
+def test_plan_and_gated_vote() -> None:
+    transport = MockUdpTransport()
+    transport.queue("200 sess LOGIN ACCEPTED", "260 VOTED\nDemo|600|1|42")
+    client = _client(transport)
+    plan = client.plan_vote(aid=42, stars=6)
+    assert plan["dry_run"] is True
+    assert plan["params"] == {"type": 1, "id": 42, "value": 600}
+    assert plan["vote_kind"] == "permanent"
+    refused = client.vote(aid=42, stars=6, allow_save=False)
+    assert refused["ok"] is False
+    assert "allow_save" in refused["error"]
+    assert len(transport.sent) == 0
+    done = client.vote(aid=42, stars=6, allow_save=True)
+    assert done["ok"] is True
+    assert done["vote"]["value"] == "600"
+    assert any(b"VOTE " in payload and b"value=600" in payload for payload in transport.sent)
+    half = client.plan_vote(aid=42, stars=7.5, temporary=True)
+    assert half["params"]["type"] == 2
+    assert half["params"]["value"] == 750
+    with pytest.raises(AniDBClientError):
+        client.plan_vote(aid=42, stars=0)
+    with pytest.raises(AniDBClientError):
+        client.plan_vote(aid=42, stars=11)
+
+
 def test_mark_watched_edits_when_already_in_mylist() -> None:
     transport = MockUdpTransport()
     transport.queue(

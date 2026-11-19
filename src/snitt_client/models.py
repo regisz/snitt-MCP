@@ -37,6 +37,14 @@ class SheetSnapshot:
     has_add_tag_link: bool = False
     has_add_genre_link: bool = False
     has_add_description_link: bool = False
+    book_id: int | None = None
+    is_favorite: bool = False
+    favorite_href: str | None = None
+    favorite_id: int | None = None
+    personal_stars: float | None = None
+    set_rating_path: str | None = None
+    has_mark_watched_link: bool = False
+    has_add_review_link: bool = False
 
     def has_tag_named(self, name: str) -> bool:
         """Return whether any visible /cimkek link uses this display name.
@@ -63,6 +71,14 @@ class SheetSnapshot:
             "has_add_tag_link": self.has_add_tag_link,
             "has_add_genre_link": self.has_add_genre_link,
             "has_add_description_link": self.has_add_description_link,
+            "book_id": self.book_id,
+            "is_favorite": self.is_favorite,
+            "favorite_href": self.favorite_href,
+            "favorite_id": self.favorite_id,
+            "personal_stars": self.personal_stars,
+            "set_rating_path": self.set_rating_path,
+            "has_mark_watched_link": self.has_mark_watched_link,
+            "has_add_review_link": self.has_add_review_link,
         }
 
 
@@ -125,6 +141,210 @@ class DescriptionPlan:
             "path": self.path,
             "fields": fields,
             "text_length": self.text_length,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class EpisodeOption:
+    """One ``watching[episode_id]`` select option from the watching modal."""
+
+    episode_id: int
+    label: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return asdict(self)
+
+
+@dataclass
+class WatchingFormSnapshot:
+    """Parsed GET ``/filmek/<slug>/filmnezesek/uj`` modal form."""
+
+    slug: str
+    title: str | None
+    path: str
+    is_series: bool
+    episodes: list[EpisodeOption] = field(default_factory=list)
+    has_in_cinema: bool = False
+    has_episode_review: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return {
+            "slug": self.slug,
+            "title": self.title,
+            "path": self.path,
+            "is_series": self.is_series,
+            "episodes": [episode.to_dict() for episode in self.episodes],
+            "has_in_cinema": self.has_in_cinema,
+            "has_episode_review": self.has_episode_review,
+        }
+
+
+@dataclass(frozen=True)
+class WatchingPlan:
+    """Dry-run plan for POST ``/filmek/<slug>/filmnezesek`` (mark watched)."""
+
+    kind: str
+    slug: str
+    method: str
+    path: str
+    fields: dict[str, str]
+    is_series: bool
+    episode_id: int | None
+    episode_label: str | None
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        fields = dict(self.fields)
+        if "watching[review]" in fields and fields["watching[review]"]:
+            fields["watching[review]"] = f"[text len={len(self.fields['watching[review]'])}]"
+        return {
+            "kind": self.kind,
+            "slug": self.slug,
+            "method": self.method,
+            "path": self.path,
+            "fields": fields,
+            "is_series": self.is_series,
+            "episode_id": self.episode_id,
+            "episode_label": self.episode_label,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class FavoritePlan:
+    """Dry-run plan for favorite heart toggle (POST kedvenc-filmek)."""
+
+    kind: str
+    slug: str
+    method: str
+    path: str
+    fields: dict[str, str]
+    want_favorite: bool
+    currently_favorite: bool
+    favorite_id: int | None
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return {
+            "kind": self.kind,
+            "slug": self.slug,
+            "method": self.method,
+            "path": self.path,
+            "fields": dict(self.fields),
+            "want_favorite": self.want_favorite,
+            "currently_favorite": self.currently_favorite,
+            "favorite_id": self.favorite_id,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class RatingPlan:
+    """Dry-run plan for personal 1–10 star rating via set_rating."""
+
+    kind: str
+    slug: str
+    method: str
+    path: str
+    fields: dict[str, str]
+    book_id: int
+    stars: int
+    previous_stars: float | None
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict (authenticity_token redacted).
+
+        :rtype: dict[str, Any]
+        """
+        fields = dict(self.fields)
+        if "authenticity_token" in fields:
+            fields["authenticity_token"] = "[redacted]"
+        return {
+            "kind": self.kind,
+            "slug": self.slug,
+            "method": self.method,
+            "path": self.path,
+            "fields": fields,
+            "book_id": self.book_id,
+            "stars": self.stars,
+            "previous_stars": self.previous_stars,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class ReviewPlan:
+    """Dry-run plan for POST ``/ertekelesek`` text review."""
+
+    kind: str
+    slug: str
+    method: str
+    path: str
+    fields: dict[str, str]
+    book_id: int
+    text_length: int
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict with review text redacted.
+
+        :rtype: dict[str, Any]
+        """
+        fields = dict(self.fields)
+        if "review[review]" in fields:
+            fields["review[review]"] = f"[text len={self.text_length}]"
+        return {
+            "kind": self.kind,
+            "slug": self.slug,
+            "method": self.method,
+            "path": self.path,
+            "fields": fields,
+            "book_id": self.book_id,
+            "text_length": self.text_length,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class DeletePlan:
+    """Dry-run plan for Rails UJS destroy (POST path + ``_method=delete``)."""
+
+    kind: str
+    resource_id: int
+    method: str
+    path: str
+    fields: dict[str, str]
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return {
+            "kind": self.kind,
+            "resource_id": self.resource_id,
+            "method": self.method,
+            "path": self.path,
+            "fields": dict(self.fields),
             "notes": list(self.notes),
         }
 
