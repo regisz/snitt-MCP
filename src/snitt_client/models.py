@@ -22,6 +22,40 @@ class TagRef:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class StreamingRef:
+    """One streaming service shown on a sheet or szerkesztés Streaming table."""
+
+    name: str
+    service_id: int | None = None
+    already_present: bool = False
+    can_add: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LinkEntry:
+    """One external link from GET /filmek/<slug>/linkek."""
+
+    link_id: int
+    url: str
+    title: str | None = None
+    username: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return asdict(self)
+
+
 @dataclass
 class SheetSnapshot:
     """Parsed film sheet state from GET /filmek/<slug>."""
@@ -34,9 +68,12 @@ class SheetSnapshot:
     open_tags: list[TagRef] = field(default_factory=list)
     all_tags: list[TagRef] = field(default_factory=list)
     description_nav_text: str | None = None
+    links_nav_text: str | None = None
+    streaming: list[StreamingRef] = field(default_factory=list)
     has_add_tag_link: bool = False
     has_add_genre_link: bool = False
     has_add_description_link: bool = False
+    has_add_link_link: bool = False
     book_id: int | None = None
     is_favorite: bool = False
     favorite_href: str | None = None
@@ -54,6 +91,14 @@ class SheetSnapshot:
         """
         return any(tag.name == name for tag in self.all_tags)
 
+    def has_streaming_named(self, name: str) -> bool:
+        """Return whether the coverbox Streaming block lists this service name.
+
+        :param str name: Exact service display name (e.g. Disney+).
+        :rtype: bool
+        """
+        return any(item.name == name for item in self.streaming)
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable dict without CSRF secret values.
 
@@ -68,9 +113,12 @@ class SheetSnapshot:
             "open_tags": [tag.to_dict() for tag in self.open_tags],
             "all_tags": [tag.to_dict() for tag in self.all_tags],
             "description_nav_text": self.description_nav_text,
+            "links_nav_text": self.links_nav_text,
+            "streaming": [item.to_dict() for item in self.streaming],
             "has_add_tag_link": self.has_add_tag_link,
             "has_add_genre_link": self.has_add_genre_link,
             "has_add_description_link": self.has_add_description_link,
+            "has_add_link_link": self.has_add_link_link,
             "book_id": self.book_id,
             "is_favorite": self.is_favorite,
             "favorite_href": self.favorite_href,
@@ -141,6 +189,68 @@ class DescriptionPlan:
             "path": self.path,
             "fields": fields,
             "text_length": self.text_length,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class LinkPlan:
+    """Dry-run plan for POST /filmek/<slug>/linkek/add."""
+
+    kind: str
+    slug: str
+    method: str
+    path: str
+    fields: dict[str, str]
+    url: str
+    already_present: bool
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return {
+            "kind": self.kind,
+            "slug": self.slug,
+            "method": self.method,
+            "path": self.path,
+            "fields": dict(self.fields),
+            "url": self.url,
+            "already_present": self.already_present,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class StreamingPlan:
+    """Dry-run plan for POST /filmek/<slug>/streaming?service=<id> (Rails UJS add)."""
+
+    kind: str
+    slug: str
+    method: str
+    path: str
+    fields: dict[str, str]
+    service_id: int
+    service_name: str
+    already_present: bool
+    notes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict.
+
+        :rtype: dict[str, Any]
+        """
+        return {
+            "kind": self.kind,
+            "slug": self.slug,
+            "method": self.method,
+            "path": self.path,
+            "fields": dict(self.fields),
+            "service_id": self.service_id,
+            "service_name": self.service_name,
+            "already_present": self.already_present,
             "notes": list(self.notes),
         }
 

@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_genre = sub.add_parser("resolve-genre", help="Resolve műfaj via genres API")
     resolve_genre.add_argument("--name", required=True)
 
+    list_tags = sub.add_parser("list-tags", help="List open-tag autocomplete matches (requires non-empty --q)")
+    list_tags.add_argument("--q", required=True, help="Autocomplete query (API q; empty/whitespace refused)")
+
+    list_genres = sub.add_parser("list-genres", help="List műfaj autocomplete matches (requires non-empty --q)")
+    list_genres.add_argument("--q", required=True, help="Autocomplete query (API q; empty/whitespace refused)")
+
     plan_tag = sub.add_parser("plan-tag", help="Dry-run plan for open tag add")
     plan_tag.add_argument("--slug", required=True)
     plan_tag.add_argument("--name", required=True)
@@ -73,6 +79,34 @@ def build_parser() -> argparse.ArgumentParser:
     apply_description.add_argument("--text")
     apply_description.add_argument("--text-file")
     apply_description.add_argument("--allow-save", action="store_true")
+
+    list_links = sub.add_parser("list-links", help="List external links on /filmek/<slug>/linkek")
+    list_links.add_argument("--slug", required=True)
+
+    list_streaming = sub.add_parser("list-streaming", help="List Streaming services from szerkesztés (+ sheet ids)")
+    list_streaming.add_argument("--slug", required=True)
+
+    plan_link = sub.add_parser("plan-link", help="Dry-run plan for link add")
+    plan_link.add_argument("--slug", required=True)
+    plan_link.add_argument("--url", required=True)
+    plan_link.add_argument("--title", help="Optional Mentés-step display title")
+
+    apply_link = sub.add_parser("apply-link", help="Save link (requires --allow-save)")
+    apply_link.add_argument("--slug", required=True)
+    apply_link.add_argument("--url", required=True)
+    apply_link.add_argument("--title", help="Optional Mentés-step display title")
+    apply_link.add_argument("--allow-save", action="store_true")
+
+    plan_streaming = sub.add_parser("plan-streaming", help="Dry-run plan for streaming service add")
+    plan_streaming.add_argument("--slug", required=True)
+    plan_streaming.add_argument("--service-id", type=int)
+    plan_streaming.add_argument("--service-name")
+
+    apply_streaming = sub.add_parser("apply-streaming", help="Save streaming service (requires --allow-save)")
+    apply_streaming.add_argument("--slug", required=True)
+    apply_streaming.add_argument("--service-id", type=int)
+    apply_streaming.add_argument("--service-name")
+    apply_streaming.add_argument("--allow-save", action="store_true")
 
     watchings = sub.add_parser("list-watchings", help="List filmnézések (read-only)")
     watchings.add_argument("--username", default="balage")
@@ -188,6 +222,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "resolve-genre":
                 tag = client.resolve_genre(args.name, exact_name=args.name)
                 return _print_json({"ok": True, "genre": tag.to_dict()})
+            if args.command == "list-tags":
+                tags = client.list_open_tags(args.q)
+                return _print_json({"ok": True, "q": args.q.strip(), "count": len(tags), "tags": [tag.to_dict() for tag in tags]})
+            if args.command == "list-genres":
+                genres = client.list_genres(args.q)
+                return _print_json(
+                    {"ok": True, "q": args.q.strip(), "count": len(genres), "genres": [genre.to_dict() for genre in genres]}
+                )
             if args.command == "plan-tag":
                 plan = client.plan_add_tag(args.slug, args.name)
                 return _print_json({"ok": True, "dry_run": True, "plan": plan.to_dict()})
@@ -216,6 +258,36 @@ def main(argv: list[str] | None = None) -> int:
                 text = _load_text_arg(args.text, args.text_file)
                 plan = client.plan_add_description(args.slug, text)
                 result = client.save_description(plan, allow_save=True)
+                return _print_json({"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}, exit_code=0 if result.ok else 1)
+            if args.command == "list-links":
+                links = client.list_links(args.slug)
+                return _print_json({"ok": True, "count": len(links), "links": [entry.to_dict() for entry in links]})
+            if args.command == "list-streaming":
+                services = client.list_streaming_services(args.slug)
+                return _print_json(
+                    {"ok": True, "count": len(services), "streaming": [item.to_dict() for item in services]}
+                )
+            if args.command == "plan-link":
+                plan = client.plan_add_link(args.slug, args.url, title=args.title)
+                return _print_json({"ok": True, "dry_run": True, "plan": plan.to_dict()})
+            if args.command == "apply-link":
+                if not args.allow_save:
+                    return _print_json({"ok": False, "error": "Refusing write without --allow-save"}, exit_code=2)
+                plan = client.plan_add_link(args.slug, args.url, title=args.title)
+                result = client.save_link(plan, allow_save=True)
+                return _print_json({"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}, exit_code=0 if result.ok else 1)
+            if args.command == "plan-streaming":
+                plan = client.plan_add_streaming(
+                    args.slug, service_id=args.service_id, service_name=args.service_name
+                )
+                return _print_json({"ok": True, "dry_run": True, "plan": plan.to_dict()})
+            if args.command == "apply-streaming":
+                if not args.allow_save:
+                    return _print_json({"ok": False, "error": "Refusing write without --allow-save"}, exit_code=2)
+                plan = client.plan_add_streaming(
+                    args.slug, service_id=args.service_id, service_name=args.service_name
+                )
+                result = client.save_streaming(plan, allow_save=True)
                 return _print_json({"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}, exit_code=0 if result.ok else 1)
             if args.command == "list-watchings":
                 events = client.list_watchings(

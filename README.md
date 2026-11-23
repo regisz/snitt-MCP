@@ -49,6 +49,12 @@ snitt plan-tag --slug grancrest-senki --name politika
 # dry-run description plan (no POST)
 snitt plan-description --slug dota-a-sarkany-vere --text "példa szöveg"
 
+# streaming + links (GET / dry-run; no POST)
+snitt list-streaming --slug nyarido-szamitas
+snitt plan-streaming --slug nyarido-szamitas --service-name Netflix
+snitt list-links --slug nyarido-szamitas
+snitt plan-link --slug nyarido-szamitas --url "https://example.com/lawful"
+
 # user-actions (GET / dry-run only; no POST)
 snitt fetch-watching-form --slug grancrest-senki
 snitt plan-mark-watched --slug grancrest-senki --episode-label "1x01"
@@ -87,7 +93,10 @@ Then use `docs/cursor-mcp.json.example` in `~/.cursor/mcp.json` (or project `.cu
   "mcpServers": {
     "snitt": {
       "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-mcp",
-      "args": []
+      "args": [],
+      "env": {
+        "SNITT_MCP_CATALOG_REV": "28"
+      }
     },
     "snitt-sheets": {
       "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-sheets-mcp",
@@ -118,6 +127,8 @@ Optional: `SNITT_COOKIE` / `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` / AniDB ENV unde
 
 4. Reload MCP / restart Cursor; tools under `snitt`, `snitt-sheets`, `snitt-anidb`, and `snitt-crunchyroll`.
 
+When **new tools** are added, bump local `mcp.json` `snitt.env.SNITT_MCP_CATALOG_REV` (example uses `28` for SN-28 streaming/links) so Cursor invalidates a stale `tools/list` fingerprint — Reload alone may not rediscover.
+
 ### Tool names
 
 | Tool | Role |
@@ -125,12 +136,20 @@ Optional: `SNITT_COOKIE` / `GOOGLE_SHEETS_SERVICE_ACCOUNT_FILE` / AniDB ENV unde
 | `snitt_fetch_sheet` | GET + parse sheet |
 | `snitt_resolve_tag` | open tag id from API |
 | `snitt_resolve_genre` | műfaj id from API |
+| `snitt_list_tags` | open-tag autocomplete list (`q` required; empty → 403) |
+| `snitt_list_genres` | műfaj autocomplete list (`q` required; empty → 403) |
 | `snitt_plan_add_tag` | dry-run open tag |
 | `snitt_plan_add_genre` | dry-run műfaj |
 | `snitt_plan_add_description` | dry-run description |
 | `snitt_apply_tag` | gated POST (`allow_save=true`) |
 | `snitt_apply_genre` | gated POST (`allow_save=true`) |
 | `snitt_apply_description` | gated POST (`allow_save=true`) |
+| `snitt_list_links` | GET `/filmek/<slug>/linkek` list |
+| `snitt_list_streaming` | szerkesztés Streaming catalog + sheet |
+| `snitt_plan_add_link` | dry-run POST `…/linkek/add` |
+| `snitt_apply_link` | gated POST (`allow_save=true`) |
+| `snitt_plan_add_streaming` | dry-run POST `…/streaming?service=<id>` |
+| `snitt_apply_streaming` | gated POST (`allow_save=true`) |
 | `snitt_verify_sheet` | re-fetch; optional `expected_tag` |
 | `snitt_list_watchings` | filmnézések list (year/type/…) |
 | `snitt_series_watch_span` | series first/latest from year pages |
@@ -173,17 +192,23 @@ Typical check: Sheets `sheets_read_records` + Snitt `snitt_list_watchings` / `sn
 | `anidb_mylist_stats` | `MYLISTSTATS` |
 | `anidb_plan_mark_watched` | dry-run `MYLISTADD` preview |
 | `anidb_mark_watched` | gated write (`allow_save=true`) |
+| `anidb_plan_set_watched_date` | dry-run watched-date edit (`viewdate`; date-only) |
+| `anidb_set_watched_date` | gated `MYLISTADD` edit (`allow_save=true`; prefer `lid`) |
 | `anidb_plan_vote` | dry-run `VOTE` preview (Permanent Vote 1–10 → value×100) |
 | `anidb_vote` | gated `VOTE` (`allow_save=true`; `temporary=true` → Temporary Vote) |
 | `anidb_reset_ban_latch` | clear local ban latch |
 
-Omit `ANIDB_PASS` from `mcp.json`; call `anidb_set_password` once per MCP process. Full setup: `docs/anidb-mcp.md`.
+Password: process memory (`anidb_set_password`) → `secret-tool` / KWallet → `~/.config/snitt/anidb.pass` (0600) → getpass (CLI) → deprecated `ANIDB_PASS`. Never put the password in `mcp.json`/git. Full setup: `docs/anidb-mcp.md`.
 
 Writes default to refuse; only pass `allow_save` / `allow_write=true` after explicit Balázs approval.
 
 ## Watch history / ratings (read-only)
 
 ```bash
+# open-tag / műfaj autocomplete (GET …_with_names.json?q=; non-empty q required)
+snitt list-tags --q harc
+snitt list-genres --q thr
+
 # what Balázs watched in 2024 (movies)
 snitt list-watchings --year 2024 --type movies
 

@@ -2,7 +2,10 @@
   "mcpServers": {
     "snitt": {
       "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-mcp",
-      "args": []
+      "args": [],
+      "env": {
+        "SNITT_MCP_CATALOG_REV": "28"
+      }
     },
     "snitt-sheets": {
       "command": "/home/balage/devel-magan/snitt-mcp/.venv/bin/snitt-sheets-mcp",

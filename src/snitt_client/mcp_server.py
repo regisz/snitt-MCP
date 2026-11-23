@@ -19,12 +19,20 @@ TOOL_NAMES: tuple[str, ...] = (
     "snitt_fetch_sheet",
     "snitt_resolve_tag",
     "snitt_resolve_genre",
+    "snitt_list_tags",
+    "snitt_list_genres",
     "snitt_plan_add_tag",
     "snitt_plan_add_genre",
     "snitt_plan_add_description",
     "snitt_apply_tag",
     "snitt_apply_genre",
     "snitt_apply_description",
+    "snitt_list_links",
+    "snitt_list_streaming",
+    "snitt_plan_add_link",
+    "snitt_apply_link",
+    "snitt_plan_add_streaming",
+    "snitt_apply_streaming",
     "snitt_verify_sheet",
     "snitt_list_watchings",
     "snitt_series_watch_span",
@@ -100,6 +108,41 @@ def create_mcp(client_factory: ClientFactory | None = None, config_path: Path | 
             with factory() as client:
                 genre = client.resolve_genre(name, exact_name=name)
                 return {"ok": True, "genre": genre.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_list_tags",
+        description=(
+            "List open-tag autocomplete matches (GET /api/open_tags_with_names.json?q=). "
+            "Non-empty q required (empty → 403). Broad prefixes may be capped (~20); no verified pagination."
+        ),
+    )
+    def snitt_list_tags(q: str) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                tags = client.list_open_tags(q)
+                return {"ok": True, "q": q.strip(), "count": len(tags), "tags": [tag.to_dict() for tag in tags]}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_list_genres",
+        description=(
+            "List műfaj autocomplete matches (GET /api/genres_with_names.json?q=). "
+            "Non-empty q required (empty → 403). No verified pagination params."
+        ),
+    )
+    def snitt_list_genres(q: str) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                genres = client.list_genres(q)
+                return {
+                    "ok": True,
+                    "q": q.strip(),
+                    "count": len(genres),
+                    "genres": [genre.to_dict() for genre in genres],
+                }
         except _TOOL_ERRORS as exc:
             return _error_payload(exc)
 
@@ -183,6 +226,110 @@ def create_mcp(client_factory: ClientFactory | None = None, config_path: Path | 
             with factory() as client:
                 plan = client.plan_add_description(slug, text)
                 result = client.save_description(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_list_links",
+        description="List external links from GET /filmek/<slug>/linkek (read-only).",
+    )
+    def snitt_list_links(slug: str) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                links = client.list_links(slug)
+                return {"ok": True, "count": len(links), "links": [entry.to_dict() for entry in links]}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_list_streaming",
+        description=(
+            "List Streaming catalog from szerkesztés (Hozzáadás ?service= ids) merged with sheet coverbox. "
+            "Read-only GET."
+        ),
+    )
+    def snitt_list_streaming(slug: str) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                services = client.list_streaming_services(slug)
+                return {"ok": True, "count": len(services), "streaming": [item.to_dict() for item in services]}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_add_link",
+        description="Dry-run plan to add an external link (POST …/linkek/add; no POST until apply).",
+    )
+    def snitt_plan_add_link(slug: str, url: str, title: str | None = None) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_add_link(slug, url, title=title)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_link",
+        description=(
+            "POST a link only when allow_save=true, then verify on linkek list. "
+            "Handles Snitt Mentés confirm (link[title]). Default refuses writes."
+        ),
+    )
+    def snitt_apply_link(
+        slug: str, url: str, allow_save: bool = False, title: str | None = None
+    ) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_add_link first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_add_link(slug, url, title=title)
+                result = client.save_link(plan, allow_save=True)
+                return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_plan_add_streaming",
+        description=(
+            "Dry-run plan to add a Streaming service (POST …/streaming?service=<id>). "
+            "Pass service_id and/or exact service_name from snitt_list_streaming."
+        ),
+    )
+    def snitt_plan_add_streaming(
+        slug: str, service_id: int | None = None, service_name: str | None = None
+    ) -> dict[str, Any]:
+        try:
+            with factory() as client:
+                plan = client.plan_add_streaming(slug, service_id=service_id, service_name=service_name)
+                return {"ok": True, "dry_run": True, "plan": plan.to_dict()}
+        except _TOOL_ERRORS as exc:
+            return _error_payload(exc)
+
+    @mcp.tool(
+        name="snitt_apply_streaming",
+        description="POST streaming only when allow_save=true, then verify on sheet. Default refuses writes.",
+    )
+    def snitt_apply_streaming(
+        slug: str,
+        service_id: int | None = None,
+        service_name: str | None = None,
+        allow_save: bool = False,
+    ) -> dict[str, Any]:
+        if not allow_save:
+            return {
+                "ok": False,
+                "error": "Refusing write without allow_save=true",
+                "dry_run_hint": "Use snitt_plan_add_streaming first",
+            }
+        try:
+            with factory() as client:
+                plan = client.plan_add_streaming(slug, service_id=service_id, service_name=service_name)
+                result = client.save_streaming(plan, allow_save=True)
                 return {"ok": result.ok, "plan": plan.to_dict(), "result": result.to_dict()}
         except _TOOL_ERRORS as exc:
             return _error_payload(exc)

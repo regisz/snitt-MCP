@@ -20,12 +20,16 @@ from snitt_client.models import (
     DeletePlan,
     DescriptionPlan,
     FavoritePlan,
+    LinkEntry,
+    LinkPlan,
     RatingEntry,
     RatingPlan,
     ReviewPlan,
     SaveResult,
     SeriesWatchSpan,
     SheetSnapshot,
+    StreamingPlan,
+    StreamingRef,
     TaggingPlan,
     TagRef,
     WatchingEvent,
@@ -33,9 +37,13 @@ from snitt_client.models import (
     WatchingPlan,
 )
 from snitt_client.parse import (
+    default_link_title,
     description_list_contains_text,
     extract_leirasok_ids,
+    parse_link_confirm_form,
+    parse_linkek_list_html,
     parse_sheet_html,
+    parse_streaming_edit_html,
     parse_watching_form_html,
 )
 from snitt_client.session import cookie_header_to_httpx_cookies, load_cookie_header
@@ -124,6 +132,30 @@ class SnittClient:
         :rtype: TagRef
         """
         return self._resolve_catalog(GENRES_API, query, exact_name, csrf_token)
+
+    def list_open_tags(self, query: str, csrf_token: str | None = None) -> list[TagRef]:
+        """List open-tag autocomplete matches via GET /api/open_tags_with_names.json?q=.
+
+        Snitt requires a non-empty ``q`` (empty/whitespace returns 403). Broad prefixes
+        may return a capped result set (observed ~20); no pagination params are verified.
+
+        :param str query: Autocomplete query (``q`` API param; non-empty after strip).
+        :param str | None csrf_token: Optional CSRF token for XHR header.
+        :rtype: list[TagRef]
+        """
+        return self._list_catalog(OPEN_TAGS_API, query, csrf_token)
+
+    def list_genres(self, query: str, csrf_token: str | None = None) -> list[TagRef]:
+        """List műfaj autocomplete matches via GET /api/genres_with_names.json?q=.
+
+        Snitt requires a non-empty ``q`` (empty/whitespace returns 403). No pagination
+        params are verified on this endpoint.
+
+        :param str query: Autocomplete query (``q`` API param; non-empty after strip).
+        :param str | None csrf_token: Optional CSRF token for XHR header.
+        :rtype: list[TagRef]
+        """
+        return self._list_catalog(GENRES_API, query, csrf_token)
 
     def plan_add_tag(self, slug: str, name: str, sheet: SheetSnapshot | None = None) -> TaggingPlan:
         """Build a dry-run plan to add an open tag (cimke).
@@ -286,6 +318,162 @@ class SnittClient:
                 "Primary sheet synopsis may not switch until editorial approval.",
                 "Verify via /filmek/<slug>/leirasok list and /leirasok/<id>.",
             ),
+        )
+
+    def list_links(self, slug: str) -> list[LinkEntry]:
+        """GET ``/filmek/<slug>/linkek`` and parse external link entries.
+
+        :param str slug: Film slug.
+        :rtype: list[LinkEntry]
+        """
+        response = self._client.get(f"/filmek/{slug}/linkek")
+        response.raise_for_status()
+        return parse_linkek_list_html(response.text)
+
+    def list_streaming_services(self, slug: str, *, sheet: SheetSnapshot | None = None) -> list[StreamingRef]:
+        """GET szerkesztés Streaming table and merge sheet service ids when present.
+
+        :param str slug: Film slug.
+        :param SheetSnapshot | None sheet: Optional pre-fetched sheet for ids/csrf.
+        :rtype: list[StreamingRef]
+        """
+        snapshot = sheet or self.fetch_sheet(slug)
+        response = self._client.get(f"/filmek/{slug}/szerkesztes")
+        response.raise_for_status()
+        catalog = parse_streaming_edit_html(response.text)
+        sheet_by_name = {item.name: item for item in snapshot.streaming}
+        merged: list[StreamingRef] = []
+        for item in catalog:
+            sheet_hit = sheet_by_name.get(item.name)
+            service_id = item.service_id
+            if service_id is None and sheet_hit is not None:
+                service_id = sheet_hit.service_id
+            already = item.already_present or sheet_hit is not None
+            merged.append(
+                StreamingRef(
+                    name=item.name,
+                    service_id=service_id,
+                    already_present=already,
+                    can_add=item.can_add and not already,
+                )
+            )
+        return merged
+
+    def plan_add_link(self, slug: str, url: str, *, title: str | None = None) -> LinkPlan:
+        """Build a dry-run plan to POST a new external link.
+
+        Verified flow: GET ``/filmek/<slug>/linkek/uj`` → POST ``…/linkek/add``
+        (``link[link]``, ``commit=Hozzáad``) → often a Mentés confirm form posting
+        to ``…/linkek`` with required ``link[title]``.
+
+        :param str slug: Film slug.
+        :param str url: Absolute http(s) URL to add.
+        :param str | None title: Optional display title for the Mentés step.
+        :rtype: LinkPlan
+        """
+        cleaned = url.strip()
+        if not cleaned:
+            raise SnittClientError("Link URL is empty.")
+        if not (cleaned.startswith("http://") or cleaned.startswith("https://")):
+            raise SnittClientError("Link URL must start with http:// or https://.")
+        existing = self.list_links(slug)
+        already = any(entry.url.rstrip("/") == cleaned.rstrip("/") for entry in existing)
+        resolved_title = (title or "").strip() or default_link_title(cleaned)
+        notes = [
+            "Verified GET /filmek/<slug>/linkek/uj → POST /filmek/<slug>/linkek/add.",
+            "Fields (step 1): utf8, link[link], commit=Hozzáad (data-remote).",
+            "Often followed by Mentés confirm: POST /filmek/<slug>/linkek with link[title].",
+            "Súgó: only lawful sources; illegal torrent/download links are not tolerated.",
+        ]
+        if already:
+            notes.append("Exact URL already on linkek list; save would be refused.")
+        return LinkPlan(
+            kind="link",
+            slug=slug,
+            method="POST",
+            path=f"/filmek/{slug}/linkek/add",
+            fields={
+                "utf8": "✓",
+                "link[link]": cleaned,
+                "commit": "Hozzáad",
+                "link[title]": resolved_title,
+            },
+            url=cleaned,
+            already_present=already,
+            notes=tuple(notes),
+        )
+
+    def plan_add_streaming(
+        self,
+        slug: str,
+        *,
+        service_id: int | None = None,
+        service_name: str | None = None,
+        sheet: SheetSnapshot | None = None,
+    ) -> StreamingPlan:
+        """Build a dry-run plan to POST a streaming service assignment.
+
+        Verified UI: szerkesztés Streaming table → ``Hozzáadás`` is
+        ``POST /filmek/<slug>/streaming?service=<id>`` (``data-remote`` / ``data-method=post``).
+
+        :param str slug: Film slug.
+        :param int | None service_id: Numeric service id from ``?service=``.
+        :param str | None service_name: Exact display name (e.g. Netflix).
+        :param SheetSnapshot | None sheet: Optional pre-fetched sheet.
+        :rtype: StreamingPlan
+        """
+        if service_id is None and not (service_name and service_name.strip()):
+            raise SnittClientError("Pass service_id or service_name for streaming add.")
+        snapshot = sheet or self.fetch_sheet(slug)
+        catalog = self.list_streaming_services(slug, sheet=snapshot)
+        match: StreamingRef | None = None
+        if service_id is not None:
+            for item in catalog:
+                if item.service_id == service_id:
+                    match = item
+                    break
+            if match is None:
+                # allow planning by id even if name-only present rows lack id
+                for item in snapshot.streaming:
+                    if item.service_id == service_id:
+                        match = StreamingRef(
+                            name=item.name, service_id=service_id, already_present=True, can_add=False
+                        )
+                        break
+            if match is None and service_name:
+                pass  # fall through to name
+            elif match is None:
+                raise SnittClientError(f"Unknown streaming service_id={service_id} on szerkesztés for {slug!r}.")
+        if match is None and service_name:
+            needle = service_name.strip()
+            exact = [item for item in catalog if item.name == needle]
+            if len(exact) != 1:
+                raise SnittClientError(
+                    f"service_name {needle!r} matched {len(exact)} catalog rows; pass service_id instead."
+                )
+            match = exact[0]
+        assert match is not None
+        resolved_id = match.service_id if match.service_id is not None else service_id
+        if resolved_id is None:
+            raise SnittClientError(f"Streaming service {match.name!r} has no service_id (already present without add link).")
+        already = match.already_present or snapshot.has_streaming_named(match.name)
+        notes = [
+            "Verified: szerkesztés Streaming «Hozzáadás» → POST /filmek/<slug>/streaming?service=<id>.",
+            "Rails UJS: data-remote=true data-method=post; empty body + X-CSRF-Token.",
+            "Plain-user MVP: add only; no verified remove control on present rows.",
+        ]
+        if already:
+            notes.append("Service already on sheet/szerkesztés; save would be refused.")
+        return StreamingPlan(
+            kind="streaming",
+            slug=slug,
+            method="POST",
+            path=f"/filmek/{slug}/streaming?service={resolved_id}",
+            fields={},
+            service_id=resolved_id,
+            service_name=match.name,
+            already_present=already,
+            notes=tuple(notes),
         )
 
     def fetch_watching_form(self, slug: str, *, sheet: SheetSnapshot | None = None) -> WatchingFormSnapshot:
@@ -671,6 +859,115 @@ class SnittClient:
             verify_details=details,
         )
 
+    def save_link(self, plan: LinkPlan, *, allow_save: bool, sheet: SheetSnapshot | None = None) -> SaveResult:
+        """POST a link plan only when allow_save is True, then verify on linkek list.
+
+        Step 1 posts ``…/linkek/add``. If Snitt returns the Mentés confirm form,
+        step 2 posts ``…/linkek`` with ``link[title]``.
+
+        :param LinkPlan plan: Dry-run link plan.
+        :param bool allow_save: Explicit write gate.
+        :param SheetSnapshot | None sheet: Sheet used for CSRF.
+        :rtype: SaveResult
+        """
+        if not allow_save:
+            raise SnittClientError("Refusing save: pass allow_save=True only with explicit permission.")
+        if plan.already_present:
+            raise SnittClientError(f"Refusing save: link URL already present: {plan.url!r}")
+        snapshot = sheet or self.fetch_sheet(plan.slug)
+        if not snapshot.csrf_token:
+            raise SnittClientError("Missing csrf-token meta on sheet; cannot POST.")
+        step1_fields = {
+            "utf8": plan.fields.get("utf8", "✓"),
+            "link[link]": plan.fields.get("link[link]", plan.url),
+            "commit": plan.fields.get("commit", "Hozzáad"),
+        }
+        response = self._client.post(
+            plan.path,
+            data=step1_fields,
+            headers=self._write_headers(snapshot.csrf_token),
+        )
+        body = response.text
+        confirm = parse_link_confirm_form(body) if response.status_code == 200 else None
+        if confirm is not None:
+            preferred_title = (plan.fields.get("link[title]") or "").strip()
+            if preferred_title:
+                confirm["link[title]"] = preferred_title
+            elif not confirm.get("link[title]"):
+                confirm["link[title]"] = default_link_title(plan.url)
+            response = self._client.post(
+                confirm["action"],
+                data={
+                    "utf8": confirm.get("utf8", "✓"),
+                    "link[link]": confirm["link[link]"],
+                    "link[title]": confirm["link[title]"],
+                    "commit": confirm.get("commit", "Mentés"),
+                },
+                headers=self._write_headers(snapshot.csrf_token),
+            )
+            body = response.text
+        verified = None
+        details: dict[str, Any] = {}
+        if response.status_code == 200:
+            after = self.list_links(plan.slug)
+            verified = any(entry.url.rstrip("/") == plan.url.rstrip("/") for entry in after)
+            details = {
+                "link_count": len(after),
+                "matching_ids": [entry.link_id for entry in after if entry.url.rstrip("/") == plan.url.rstrip("/")],
+                "links_nav_after": self.fetch_sheet(plan.slug).links_nav_text,
+                "used_confirm_step": confirm is not None,
+            }
+        return SaveResult(
+            ok=response.status_code == 200 and bool(verified),
+            status_code=response.status_code,
+            response_content_type=response.headers.get("content-type"),
+            response_body=body[:4000],
+            verified=verified,
+            verify_details=details,
+        )
+
+    def save_streaming(
+        self, plan: StreamingPlan, *, allow_save: bool, sheet: SheetSnapshot | None = None
+    ) -> SaveResult:
+        """POST a streaming plan only when allow_save is True, then verify on sheet.
+
+        :param StreamingPlan plan: Dry-run streaming plan.
+        :param bool allow_save: Explicit write gate.
+        :param SheetSnapshot | None sheet: Sheet used for CSRF.
+        :rtype: SaveResult
+        """
+        if not allow_save:
+            raise SnittClientError("Refusing save: pass allow_save=True only with explicit permission.")
+        if plan.already_present:
+            raise SnittClientError(f"Refusing save: streaming {plan.service_name!r} already present.")
+        snapshot = sheet or self.fetch_sheet(plan.slug)
+        if not snapshot.csrf_token:
+            raise SnittClientError("Missing csrf-token meta on sheet; cannot POST.")
+        response = self._client.post(
+            plan.path,
+            data=plan.fields or None,
+            headers=self._write_headers(snapshot.csrf_token),
+        )
+        body = response.text
+        verified = None
+        details: dict[str, Any] = {}
+        if response.status_code == 200:
+            after = self.fetch_sheet(plan.slug)
+            verified = after.has_streaming_named(plan.service_name)
+            details = {
+                "streaming_after": [item.to_dict() for item in after.streaming],
+                "expected_name": plan.service_name,
+                "expected_service_id": plan.service_id,
+            }
+        return SaveResult(
+            ok=response.status_code == 200 and bool(verified),
+            status_code=response.status_code,
+            response_content_type=response.headers.get("content-type"),
+            response_body=body[:4000],
+            verified=verified,
+            verify_details=details,
+        )
+
     def save_watching(
         self,
         plan: WatchingPlan,
@@ -926,21 +1223,35 @@ class SnittClient:
         match = re.search(r'content="([^"]+)"\s+name="csrf-token"', response.text)
         return match.group(1) if match else None
 
-    def _resolve_catalog(self, api_path: str, query: str, exact_name: str | None, csrf_token: str | None) -> TagRef:
+    def _list_catalog(self, api_path: str, query: str, csrf_token: str | None) -> list[TagRef]:
+        # Snitt autocomplete: GET …_with_names.json?q=<query>; empty/whitespace q → 403.
+        stripped = query.strip()
+        if not stripped:
+            raise SnittClientError(
+                f"Autocomplete catalog requires non-empty q (empty/whitespace returns 403): {api_path}"
+            )
         headers = {"Accept": JSON_ACCEPT, "X-Requested-With": "XMLHttpRequest"}
         if csrf_token:
             headers["X-CSRF-Token"] = csrf_token
-        response = self._client.get(api_path, params={"q": query}, headers=headers)
+        response = self._client.get(api_path, params={"q": stripped}, headers=headers)
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, list):
             raise SnittClientError(f"Unexpected autocomplete payload from {api_path}")
-        target = exact_name or query
-        matches = [item for item in payload if isinstance(item, dict) and item.get("name") == target]
-        if not matches:
-            raise SnittClientError(f"No exact autocomplete match for {target!r} in {api_path}?q={quote(query)}")
-        item = matches[0]
-        return TagRef(name=str(item["name"]), tag_id=int(item["id"]), href=None)
+        results: list[TagRef] = []
+        for item in payload:
+            if not isinstance(item, dict) or "id" not in item or "name" not in item:
+                continue
+            results.append(TagRef(name=str(item["name"]), tag_id=int(item["id"]), href=None))
+        return results
+
+    def _resolve_catalog(self, api_path: str, query: str, exact_name: str | None, csrf_token: str | None) -> TagRef:
+        matches = self._list_catalog(api_path, query, csrf_token)
+        target = exact_name or query.strip()
+        exact = [item for item in matches if item.name == target]
+        if not exact:
+            raise SnittClientError(f"No exact autocomplete match for {target!r} in {api_path}?q={quote(query.strip())}")
+        return exact[0]
 
     def _tagging_plan(self, *, kind: str, slug: str, name: str, tag_id: int, sheet: SheetSnapshot) -> TaggingPlan:
         if not tag_id:
